@@ -1,0 +1,82 @@
+import whisper  # Install with: pip install openai-whisper
+import sounddevice as sd  # Install with: pip install sounddevice
+import numpy as np
+import wavio  # Install with: pip install wavio
+import os
+import keyboard  # Install with: pip install keyboard
+import time
+import traceback  # For printing full traceback on errors
+import tempfile  # For creating temporary files in a writable directory
+
+# Load the Whisper model (use 'tiny' for faster/lightweight, 'base' or 'small' for better accuracy)
+model = whisper.load_model("tiny")  # Download happens automatically on first run
+
+def record_audio(fs=16000):
+    """
+    Record audio from microphone while the space bar is held down.
+    """
+    print("Recording... Release space bar to stop.")
+    audio = [] # List to hold recorded audio chunks
+    
+    def callback(indata, frames, time_info, status):
+        if status:
+            print(status)
+        audio.append(indata.copy()) # Append the recorded chunk to the list
+    
+    stream = sd.InputStream(samplerate=fs, channels=1, dtype='int16', callback=callback)
+    stream.start() # Start the audio stream
+    
+    while keyboard.is_pressed('space'):
+        time.sleep(0.01)  # Small sleep to avoid high CPU usage
+    
+    stream.stop() # Stop the audio stream
+    stream.close() # Stop and close the audio stream
+    
+    if audio:
+        audio = np.concatenate(audio, axis=0) # Concatenate all recorded chunks
+        # Use a temporary file in the system's temp directory to avoid permission issues
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_wav: # Create a temporary WAV file
+            wavio.write(temp_wav.name, audio, fs, sampwidth=2) # Write audio to WAV file
+            return temp_wav.name # Return the path to the temporary WAV file
+    else: # if no audio was recorded
+        return None # No audio recorded
+
+def transcribe_audio(audio_file): # Transcribe audio using Whisper
+    """
+    Transcribe the audio file using Whisper.
+    """
+    result = model.transcribe(audio_file) # Transcribe the audio file
+    transcription = result["text"].strip() # Get the transcribed text
+    return transcription # Return the transcribed text
+
+# Main execution
+if __name__ == "__main__": # If this script is run directly
+    try:
+        print("Program started. Hold space bar to record audio, release to transcribe.")
+        print("Press 'q' during waiting to quit.")
+        
+        while True:
+            # Wait for space bar press or 'q' to quit
+            while not keyboard.is_pressed('space'): # Wait until space bar is pressed
+                if keyboard.is_pressed('q'): # Check if 'q' is pressed to quit
+                    print("\nQuitting the program.") # Print quitting message
+                    exit()  # Or use sys.exit() if you import sys
+                time.sleep(0.01) # Small sleep to avoid high CPU usage
+            
+            audio_file = record_audio() # Record audio while space bar is held
+            
+            if audio_file: # If audio was recorded
+                text = transcribe_audio(audio_file) # Transcribe the recorded audio
+                print("\nTranscribed text:\n" + text) # Print the transcribed text
+                os.remove(audio_file) # Clean up the temporary audio file
+            
+            # After transcription, prompt to continue or exit
+            user_input = input("\nPress Enter to continue (ready for next recording) or type 'q' and Enter to exit: ") # Prompt user for next action
+            if user_input.lower() == 'q': # If user wants to quit
+                print("Exiting the program.")
+                break # Exit the loop and end the program
+    except Exception as e: # Catch any exceptions
+        print(f"An error occurred: {e}") # Print the error message
+        traceback.print_exc()  # Prints the full traceback for debugging
+    finally:
+        input("\nPress Enter to exit...")  # Pauses the window so it doesn't close immediately
